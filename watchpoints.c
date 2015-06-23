@@ -9,37 +9,37 @@
 #include "watchpoints.h"
 
 
-MODULE_AUTHOR ("Benjamin Schubert, <benjamin.schubert@epfl.ch>");
-MODULE_DESCRIPTION ("Set watchpoints from proc without going through ptrace");
-MODULE_LICENSE ("GPL");
+MODULE_AUTHOR("Benjamin Schubert <benjamin.schubert@epfl.ch>");
+MODULE_DESCRIPTION("Set watchpoints from proc without going through ptrace");
+MODULE_LICENSE("GPL");
 
 
-// on x86_64. there is only 4 watchpoints.
+// on x86_64 there are only 4 watchpoints
 #define WATCHPOINTS_MAX 4
 
 
-// Change_list object, to keep track of any change in data tracked
+// Change_list object, to keep track of any changes in the tracked data
 struct change_list {
-	// the pid of the program owning the memory
+	// pid of the program owning the memory
 	pid_t pid;
-	// the userspace pointer to the memory
+	// userspace pointer to the memory
 	__u64 ptr;
-	// the new value of the data
+	// new value of the data
 	char *data; 
-	// the size of the data chunk
+	// size of the data chunk
 	int data_size;
-	// the list to which the data belongs
+	// list to which the data belongs
 	struct list_head list;
 };
 
 
-// the place of the last byte read from the last entry read (partially)
-int last_entry_offset = 0;
+// place of the last byte read from the last entry read (partially)
+static int last_entry_offset = 0;
 
-// the size of the data of each data currently tracked
-long watchpoint_data_size[WATCHPOINTS_MAX];
+// size of the data of each data currently tracked
+static long watchpoint_data_size[WATCHPOINTS_MAX];
 
-// the watchpoints class
+// watchpoints class
 static struct class *watchpoints_class = NULL;
 
 // table containing each watchpoint set
@@ -49,14 +49,15 @@ struct perf_event *watchpoints[WATCHPOINTS_MAX];
 struct change_list changes;
 
 
-static void watchpoint_handler(struct perf_event *bp, struct perf_sample_data
-			       *data, struct pt_regs *regs);
-static long watchpoints_ioctl(struct file *file, unsigned int cmd, long
-			      unsigned ptr_message);
+static void watchpoint_handler(struct perf_event *bp, 
+			       struct perf_sample_data *data, 
+			       struct pt_regs *regs);
+static long watchpoints_ioctl(struct file *file, unsigned int cmd, 
+			      long unsigned ptr_message);
 static ssize_t watchpoints_read(struct file *file,
-                                char __user * user_buffer,
+                                char __user *user_buffer,
                                 size_t length,
-                                loff_t * offset);
+                                loff_t *offset);
 
 static int __init watchpoint_init(void);
 static void __exit watchpoint_exit(void);
@@ -74,24 +75,20 @@ module_init(watchpoint_init);
 module_exit(watchpoint_exit);
 
 
-static void watchpoint_handler(struct perf_event *bp, struct perf_sample_data
-			                   *data, struct pt_regs *regs)
+static void watchpoint_handler(struct perf_event *bp, 
+			       struct perf_sample_data *data, 
+			       struct pt_regs *regs)
 {
-	int i;
-	long size;
-	
-	for(i=0; i < WATCHPOINTS_MAX; i++) {
-		struct change_list *new_change;
-		
+	for(int i = 0; i < WATCHPOINTS_MAX; i++) {
 		if(!watchpoints[i] &&
 		           watchpoints[i]->attr.bp_addr == bp->attr.bp_addr) {
 			continue;
 		}
 		
-		new_change = kmalloc(
-						sizeof(struct change_list), __GFP_IO | __GFP_FS);
+		struct change_list *new_change = 
+		    kmalloc(sizeof(struct change_list), __GFP_IO | __GFP_FS);
 		
-		size = watchpoint_data_size[i];
+		long size = watchpoint_data_size[i];
 		new_change->data = kmalloc(size + 1, __GFP_IO | __GFP_FS);
 		
 		if(!new_change->data) {
@@ -113,15 +110,11 @@ static void watchpoint_handler(struct perf_event *bp, struct perf_sample_data
 }
 
 
-static long watchpoints_ioctl(struct file *file, unsigned int cmd, long
-			      unsigned ptr_message)
+static long watchpoints_ioctl(struct file *file, unsigned int cmd, 
+			      long unsigned ptr_message)
 {
 	struct watchpoint_message data;
-	struct perf_event_attr attr;
-	struct perf_event * perf_watchpoint;
-	int i;
-
-	copy_from_user(&data, (void *) ptr_message, sizeof(data));
+	copy_from_user(&data, (void*) ptr_message, sizeof(data));
 	
 	if(data.pid != current->pid) {
 		printk(KERN_ERR
@@ -133,79 +126,71 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd, long
 	       data.pid, data.data_ptr, data.data_size);
 
 	switch(cmd) {
-		struct task_struct *tsk;
-		
-		case ADD_BREAKPOINT:
-			// Initialize breakpoint
-			hw_breakpoint_init(&attr);
-			attr.bp_addr = data.data_ptr;
-			attr.bp_len = HW_BREAKPOINT_LEN_4;
-			attr.bp_type = HW_BREAKPOINT_W;
+	case ADD_BREAKPOINT:
+		// Initialize breakpoint
+		struct perf_event_attr attr;
+		hw_breakpoint_init(&attr);
+		attr.bp_addr = data.data_ptr;
+		attr.bp_len = HW_BREAKPOINT_LEN_4;
+		attr.bp_type = HW_BREAKPOINT_W;
 
-			tsk = pid_task(find_vpid(data.pid), PIDTYPE_PID);
+		struct task_struct *tsk = pid_task(find_vpid(data.pid), PIDTYPE_PID);
 
-			perf_watchpoint = register_user_hw_breakpoint(&attr,
-					watchpoint_handler, NULL, tsk);
+		struct perf_event *perf_watchpoint = 
+			register_user_hw_breakpoint(&attr, watchpoint_handler, NULL, tsk);
 			
-			if (IS_ERR(perf_watchpoint)) {
-				printk(KERN_DEBUG "Could not set watchpoint");
-				return perf_watchpoint;
-			}
+		if (IS_ERR(perf_watchpoint)) {
+			printk(KERN_DEBUG "Could not set watchpoint");
+			return perf_watchpoint;
+		}
 
-			for(i = 0; i < WATCHPOINTS_MAX; i++) {
-				if(! watchpoints[i]) {
-					watchpoints[i] = perf_watchpoint;
-					watchpoint_data_size[i] = data.data_size;
-					break;
-				}
-				else if(watchpoints[i]->state ==
-					PERF_EVENT_STATE_OFF) {
-					printk(KERN_DEBUG 
+		for(int i = 0; i < WATCHPOINTS_MAX; i++) {
+			if(watchpoints[i] && 
+			   watchpoints[i]->state == PERF_EVENT_STATE_OFF) {
+				printk(KERN_DEBUG 
 					"Removing watchpoint at %i. Not used anymore\n", i);
-					
-					unregister_hw_breakpoint(watchpoints[i]);
-					watchpoints[i] = perf_watchpoint;
-					watchpoint_data_size[i] = data.data_size;
-					break;
-				}
+				unregister_hw_breakpoint(watchpoints[i]);
+				watchpoints[i] = NULL;
 			}
-			break;
-
-		case REMOVE_BREAKPOINT:
-			for(i = 0; i < WATCHPOINTS_MAX; i++) {
-				if(watchpoints[i] &&
-				    watchpoints[i]->attr.bp_addr ==
-				    data.data_ptr &&
-				    watchpoints[i]->ctx->task->pid == data.pid) {
-					unregister_hw_breakpoint(watchpoints[i]);
-				}
+			if(!watchpoints[i]) {
+				watchpoints[i] = perf_watchpoint;
+				watchpoint_data_size[i] = data.data_size;
+				break;
 			}
+		}
+		break;
 
-		default:
-			return -EINVAL;
+	case REMOVE_BREAKPOINT:
+		for(int i = 0; i < WATCHPOINTS_MAX; i++) {
+			if(watchpoints[i] &&
+			   watchpoints[i]->attr.bp_addr == data.data_ptr &&
+			   watchpoints[i]->ctx->task->pid == data.pid) {
+				unregister_hw_breakpoint(watchpoints[i]);
+			}
+		}
 
-
+	default:
+		return -EINVAL;
 	}
+	
 	return 0;
 }
 
 
-static ssize_t
-watchpoints_read(struct file *file, char __user * user_buffer,
-                 size_t length, loff_t * offset)
+static ssize_t watchpoints_read(struct file *file, char __user *user_buffer,
+                		size_t length, loff_t *offset)
 {
 	struct change_list *new_change;
-	char template[] = "pid=%d, pointer=%llu, value=%s\n";
-	char* output;
-	char* output_pointer;
+	char[] template = "pid=%d, pointer=%llu, value=%s\n";
+	char *output;
+	char *output_pointer;
 	struct list_head *pos, *q;
 	size_t bytes_read = 0;
 	
 	list_for_each_safe(pos, q, &changes.list) {
 		new_change = list_first_entry(&(changes.list),
 		                              struct change_list, list);
-		output = kmalloc(snprintf(
-		                          NULL, 0, template, new_change->pid,
+		output = kmalloc(snprintf(NULL, 0, template, new_change->pid,
 		                          new_change->ptr, new_change->data)
 		                 , __GFP_REPEAT);
 		sprintf(output, template, new_change->pid, new_change->ptr,
@@ -215,8 +200,8 @@ watchpoints_read(struct file *file, char __user * user_buffer,
 		
 		while(length && *output_pointer) {
 			put_user(*(output_pointer++), user_buffer++);
-			length --;
-			bytes_read ++;
+			length--;
+			bytes_read++;
 		}
 
 		if(! *output_pointer) {
@@ -224,8 +209,7 @@ watchpoints_read(struct file *file, char __user * user_buffer,
 			kfree(new_change->data);
 			list_del(pos);
 			last_entry_offset = 0;
-		}
-		else {
+		} else {
 			last_entry_offset = output_pointer - output;
 		}
 		kfree(output);
@@ -236,21 +220,18 @@ watchpoints_read(struct file *file, char __user * user_buffer,
 	}
 
 	return bytes_read;
-	
 }
 
 
 static int __init watchpoint_init(void)
 {
-	void *ptr_err;
-
 	watchpoints_class = class_create(THIS_MODULE, DEVICE_NAME);
 	if(IS_ERR(watchpoints_class)) {
 		return -EFAULT;
 	}
 
-	ptr_err = device_create(watchpoints_class, NULL, MKDEV(MAJOR_NUM, 0),
-				NULL, DEVICE_NAME);
+	void *ptr_err = device_create(watchpoints_class, NULL, MKDEV(MAJOR_NUM, 0),
+				      NULL, DEVICE_NAME);
 	if (IS_ERR(ptr_err)) {
 		class_unregister(watchpoints_class);
 		class_destroy(watchpoints_class);
