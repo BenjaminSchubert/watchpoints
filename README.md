@@ -1,5 +1,5 @@
 # watchpoints
-A Linux kernel module for setting up watchpoints without going through ptrace.
+A Linux kernel module for setting up watchpoints without going through ptrace
 
 This module aims to be a lightweight replacement to the ptrace module for setting and reporting values.
 
@@ -9,7 +9,7 @@ This module aims to be a lightweight replacement to the ptrace module for settin
 To compile watchpoints, hit `make` in the top directory.
 
 #### Loading
-watchpoints is loaded as a normal kernel module as `insmod ${path_to_watchpoints.ko}` .
+Watchpoints is loaded as a normal kernel module as `insmod ${path_to_watchpoints.ko}` .
 
 #### Watching an address
 An watchpoint can only be set by the process owning the address space. To watch an address, send an ioctl to `/dev/watchpoints`, with code `1` and a pointer to a struct of form :
