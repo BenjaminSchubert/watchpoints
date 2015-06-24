@@ -230,7 +230,7 @@ static ssize_t watchpoints_read(struct file *file, char __user *user_buffer,
 static int __init watchpoint_init(void)
 {
 	void *ptr_err;
-	
+
 	watchpoints_class = class_create(THIS_MODULE, DEVICE_NAME);
 	if(IS_ERR(watchpoints_class)) {
 		return -EFAULT;
@@ -256,7 +256,7 @@ static void __exit watchpoint_exit(void)
 {
 	struct change_list *new_change;
 	struct list_head *pos, *q;
-	
+
 	list_for_each_safe(pos, q, &changes.list) {
 		new_change = list_first_entry(&(changes.list), struct change_list, list);
 		kfree(new_change->data);
