@@ -83,20 +83,19 @@ static void watchpoint_handler(struct perf_event *bp,
 	for(i = 0; i < WATCHPOINTS_MAX; i++) {
 		struct change_list *new_change;
 		long size;
-		
-		if(!watchpoints[i] &&
-		           watchpoints[i]->attr.bp_addr == bp->attr.bp_addr) {
+
+		if(!watchpoints[i] && watchpoints[i]->attr.bp_addr == bp->attr.bp_addr) {
 			continue;
 		}
-		
+
 		new_change = kmalloc(sizeof(struct change_list), __GFP_IO | __GFP_FS);
 		size = watchpoint_data_size[i];
-		
+
 		new_change->data = kmalloc(size + 1, __GFP_IO | __GFP_FS);
 		if(!new_change->data) {
 			return;
 		}
-		
+
 		copy_from_user(new_change->data, (void*) bp->attr.bp_addr, size);
 		new_change->data[size] = '\0';
 		new_change->pid = watchpoints[i]->ctx->task->pid;
@@ -106,7 +105,7 @@ static void watchpoint_handler(struct perf_event *bp,
 		printk(KERN_DEBUG
 	           "Process %d, at position %llu, new value :%s\n",
 	           new_change->pid, new_change->ptr, new_change->data);
-		
+
 		list_add_tail(&(new_change->list), &(changes.list));
 		break;
 	}
@@ -118,23 +117,23 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 {
 	struct watchpoint_message data;
 	copy_from_user(&data, (void*) ptr_message, sizeof(data));
-	
+
 	if(data.pid != current->pid) {
 		printk(KERN_ERR "Attempting to place breakpoint on other process. Abort\n");
 		return -EINVAL;
 	}
-	
+
 	printk(KERN_DEBUG "Received pid %d, ptr %ld, size %ld\n",
 	       data.pid, data.data_ptr, data.data_size);
 
 	switch(cmd) {
 		int i;
-		
+
 	case ADD_BREAKPOINT:
 		struct perf_event_attr attr;
 		struct perf_event *perf_watchpoint;
 		struct task_struct *tsk;
-		
+
 		hw_breakpoint_init(&attr);
 		attr.bp_addr = data.data_ptr;
 		attr.bp_len = HW_BREAKPOINT_LEN_4;
@@ -142,7 +141,7 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 
 		tsk = pid_task(find_vpid(data.pid), PIDTYPE_PID);
 		perf_watchpoint = register_user_hw_breakpoint(&attr, watchpoint_handler, NULL, tsk);
-			
+	
 		if (IS_ERR(perf_watchpoint)) {
 			printk(KERN_DEBUG "Could not set watchpoint");
 			return perf_watchpoint;
@@ -163,7 +162,7 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			}
 		}
 		break;
-	
+
 	case REMOVE_BREAKPOINT:
 		for(i = 0; i < WATCHPOINTS_MAX; i++) {
 			if(watchpoints[i] &&
@@ -176,7 +175,7 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 	default:
 		return -EINVAL;
 	}
-	
+
 	return 0;
 }
 
@@ -190,7 +189,8 @@ static ssize_t watchpoints_read(struct file *file, char __user *user_buffer,
 	char *output_pointer;
 	struct list_head *pos, *q;
 	size_t bytes_read;
-	
+	bytes_read = 0;
+
 	list_for_each_safe(pos, q, &changes.list) {
 		new_change = list_first_entry(&(changes.list),
 		                              struct change_list, list);
@@ -201,8 +201,7 @@ static ssize_t watchpoints_read(struct file *file, char __user *user_buffer,
 		        new_change->data);
 		output_pointer = output + last_entry_offset;
 		printk(KERN_DEBUG "%s", output);
-		
-		bytes_read = 0;
+
 		while(length && *output_pointer) {
 			put_user(*(output_pointer++), user_buffer++);
 			length--;
@@ -263,7 +262,7 @@ static void __exit watchpoint_exit(void)
 		kfree(new_change->data);
 		list_del(pos);
 	}
-	
+
 	unregister_chrdev(MAJOR_NUM, DEVICE_NAME);
 	device_destroy(watchpoints_class, MKDEV(MAJOR_NUM, 0));
 	class_unregister(watchpoints_class);
