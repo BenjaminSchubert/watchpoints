@@ -50,14 +50,14 @@ struct change_list changes;
 
 
 static void watchpoint_handler(struct perf_event *bp, 
-			       struct perf_sample_data *data, 
-			       struct pt_regs *regs);
+			        struct perf_sample_data *data, 
+			        struct pt_regs *regs);
 static long watchpoints_ioctl(struct file *file, unsigned int cmd, 
-			      long unsigned ptr_message);
+			       long unsigned ptr_message);
 static ssize_t watchpoints_read(struct file *file,
-                                char __user *user_buffer,
-                                size_t length,
-                                loff_t *offset);
+                                 char __user *user_buffer,
+                                 size_t length,
+                                 loff_t *offset);
 
 static int __init watchpoint_init(void);
 static void __exit watchpoint_exit(void);
