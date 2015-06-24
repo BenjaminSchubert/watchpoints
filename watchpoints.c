@@ -128,10 +128,12 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 	       data.pid, data.data_ptr, data.data_size);
 
 	switch(cmd) {
-	case ADD_BREAKPOINT: {
-		struct perf_event_attr attr;
-		struct task_struct *tsk;
 		int i;
+		
+	case ADD_BREAKPOINT:
+		struct perf_event_attr attr;
+		struct perf_event *perf_watchpoint;
+		struct task_struct *tsk;
 		
 		hw_breakpoint_init(&attr);
 		attr.bp_addr = data.data_ptr;
@@ -139,9 +141,7 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 		attr.bp_type = HW_BREAKPOINT_W;
 
 		tsk = pid_task(find_vpid(data.pid), PIDTYPE_PID);
-
-		struct perf_event *perf_watchpoint = 
-			register_user_hw_breakpoint(&attr, watchpoint_handler, NULL, tsk);
+		perf_watchpoint = register_user_hw_breakpoint(&attr, watchpoint_handler, NULL, tsk);
 			
 		if (IS_ERR(perf_watchpoint)) {
 			printk(KERN_DEBUG "Could not set watchpoint");
@@ -163,7 +163,6 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			}
 		}
 		break;
-	}
 	
 	case REMOVE_BREAKPOINT:
 		for(i = 0; i < WATCHPOINTS_MAX; i++) {
