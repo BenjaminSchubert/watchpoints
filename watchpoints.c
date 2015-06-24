@@ -237,7 +237,7 @@ static int __init watchpoint_init(void)
 	}
 
 	ptr_err = device_create(watchpoints_class, NULL, MKDEV(MAJOR_NUM, 0),
-				      NULL, DEVICE_NAME);
+				NULL, DEVICE_NAME);
 	if (IS_ERR(ptr_err)) {
 		class_unregister(watchpoints_class);
 		class_destroy(watchpoints_class);
