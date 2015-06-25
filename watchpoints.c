@@ -9,44 +9,44 @@
 #include "watchpoints.h"
 
 
-MODULE_AUTHOR("Benjamin Schubert, <benjamin.schubert@epfl.ch>");
+MODULE_AUTHOR("Benjamin Schubert <benjamin.schubert@epfl.ch>");
 MODULE_DESCRIPTION
     ("Set watchpoints from proc without going through ptrace");
 MODULE_LICENSE("GPL");
 
 
-// on x86_64. there is only 4 watchpoints.
+/* on x86_64 there are only 4 watchpoints */
 #define WATCHPOINTS_MAX 4
 
 
-// Change_list object, to keep track of any change in data tracked
+/* Change_list object, to keep track of any change in the tracked data */
 struct change_list {
-	// the pid of the program owning the memory
+	/* pid of the program owning the memory */
 	pid_t pid;
-	// the userspace pointer to the memory
+	/* userspace pointer to the memory */
 	__u64 ptr;
-	// the new value of the data
+	/* new value of the data */
 	char *data;
-	// the size of the data chunk
+	/* size of the data chunk */
 	int data_size;
-	// the list to which the data belongs
+	/* list to which the data belongs */
 	struct list_head list;
 };
 
 
-// the place of the last byte read from the last entry read (partially)
-int last_entry_offset = 0;
+/* the place of the last byte read from the last entry read (partially) */
+static int last_entry_offset = 0;
 
-// the size of the data of each data currently tracked
-long watchpoint_data_size[WATCHPOINTS_MAX];
+/* the size of the data for each currently tracked data */
+static long watchpoint_data_size[WATCHPOINTS_MAX];
 
-// the watchpoints class
+/* the watchpoints class */
 static struct class *watchpoints_class = NULL;
 
-// table containing each watchpoint set
+/* table containing each watchpoint set */
 struct perf_event *watchpoints[WATCHPOINTS_MAX];
 
-// list of all changes to tracked data
+/* list of all changes to tracked data */
 struct change_list changes;
 
 
@@ -80,10 +80,10 @@ static void watchpoint_handler(struct perf_event *bp,
 			       struct pt_regs *regs)
 {
 	int i;
-	long size;
 
 	for (i = 0; i < WATCHPOINTS_MAX; i++) {
 		struct change_list *new_change;
+		long size;
 
 		if (!watchpoints[i]
 		    && watchpoints[i]->attr.bp_addr == bp->attr.bp_addr) {
@@ -96,10 +96,10 @@ static void watchpoint_handler(struct perf_event *bp,
 
 		size = watchpoint_data_size[i];
 		new_change->data = kmalloc(size + 1, __GFP_IO | __GFP_FS);
-
 		if (!new_change->data) {
 			return;
 		}
+
 		copy_from_user(new_change->data, (void *) bp->attr.bp_addr,
 			       size);
 		new_change->data[size] = '\0';
@@ -121,9 +121,6 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			      long unsigned ptr_message)
 {
 	struct watchpoint_message data;
-	struct perf_event_attr attr;
-	struct perf_event *perf_watchpoint;
-	int i;
 
 	copy_from_user(&data, (void *) ptr_message, sizeof(data));
 
@@ -137,10 +134,13 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 	       data.data_ptr, data.data_size);
 
 	switch (cmd) {
+	case ADD_BREAKPOINT: {
 		struct task_struct *tsk;
+		struct perf_event_attr attr;
+		struct perf_event *perf_watchpoint;
+		int i;
 
-	case ADD_BREAKPOINT:
-		// Initialize breakpoint
+		/* Initialize breakpoint */
 		hw_breakpoint_init(&attr);
 		attr.bp_addr = data.data_ptr;
 		attr.bp_len = HW_BREAKPOINT_LEN_4;
@@ -175,8 +175,11 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			}
 		}
 		break;
+	}
 
-	case REMOVE_BREAKPOINT:
+	case REMOVE_BREAKPOINT: {
+		int i;
+
 		for (i = 0; i < WATCHPOINTS_MAX; i++) {
 			if (watchpoints[i]
 			    && watchpoints[i]->attr.bp_addr ==
@@ -186,6 +189,8 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 				unregister_hw_breakpoint(watchpoints[i]);
 			}
 		}
+		break;
+	}
 
 	default:
 		return -EINVAL;
@@ -228,7 +233,7 @@ watchpoints_read(struct file *file, char __user * user_buffer,
 		}
 
 		if (!*output_pointer) {
-			// we finished processing this entry, let's clean !
+			/* we finished processing this entry, let's clean ! */
 			kfree(new_change->data);
 			list_del(pos);
 			last_entry_offset = 0;
@@ -237,7 +242,7 @@ watchpoints_read(struct file *file, char __user * user_buffer,
 		}
 		kfree(output);
 		if (!length) {
-			// we finished putting things in the buffer, let's break !
+			/* we finished putting things in the buffer, let's break ! */
 			break;
 		}
 	}
