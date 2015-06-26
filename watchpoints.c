@@ -140,6 +140,13 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 		struct perf_event *perf_watchpoint;
 		int i;
 
+		if(!access_ok(VERIFY_READ, data.data_ptr, data.data_size)) {
+			printk(KERN_ERR
+			       "Process %d tried to access address %ld",
+			       data.pid, data.data_ptr);
+			return -EINVAL;
+		}
+
 		/* Initialize breakpoint */
 		hw_breakpoint_init(&attr);
 		attr.bp_addr = data.data_ptr;
@@ -224,7 +231,10 @@ watchpoints_read(struct file *file, char __user * user_buffer,
 		sprintf(output, template, new_change->pid, new_change->ptr,
 			new_change->data);
 		output_pointer = output + last_entry_offset;
-		printk(KERN_DEBUG "%s", output);
+
+		if(last_entry_offset == 0) {
+			printk(KERN_DEBUG "%s", output);
+		}
 
 		while (length && *output_pointer) {
 			put_user(*(output_pointer++), user_buffer++);
@@ -274,6 +284,7 @@ static int __init watchpoint_init(void)
 
 	INIT_LIST_HEAD(&changes.list);
 
+	printk(KERN_INFO "Loaded watchpoints module\n");
 	return 0;
 }
 
@@ -295,4 +306,6 @@ static void __exit watchpoint_exit(void)
 	device_destroy(watchpoints_class, MKDEV(MAJOR_NUM, 0));
 	class_unregister(watchpoints_class);
 	class_destroy(watchpoints_class);
+
+	printk(KERN_INFO "Unloaded watchpoints module\n");
 }
