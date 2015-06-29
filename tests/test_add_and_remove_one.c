@@ -18,13 +18,13 @@ void print(int num) {
 void test_add_and_remove() {
 	int file_desc;
 	int ret_val;
-	char buff[2];
+	char buff[10];
+	/*char *results;*/
 	/*char *p;*/
 	struct watchpoint_message data;
 	
 	pid_t pid = getpid();
 	long track_me = 12098;
-	print(track_me);
 	
 	memset(buff, '\0', sizeof(buff));
 	
@@ -40,20 +40,18 @@ void test_add_and_remove() {
 	
 	if(track_me) {
 		track_me = 532;
-		print(track_me);
 	}
 	
 	if(track_me) {
 		track_me = 12;
-		print(track_me);
 	}
 	
 	ret_val = ioctl(file_desc, 2, &data);
 	CU_ASSERT_FALSE(ret_val);
 	
-	while( read(file_desc, buff, 1 )) {
+	/*while( read(file_desc, buff, 1 )) {
 		printf("%s", buff);
-	}
+	}*/
 	
 }
 

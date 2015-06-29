@@ -24,21 +24,21 @@ struct change_list {
 	/* pid of the program owning the memory */
 	pid_t pid;
 	/* userspace pointer to the memory */
-	__u64 ptr;
+	u64 ptr;
 	/* new value of the data */
-	char *data;
+	u8 *data;
 	/* size of the data chunk */
-	int data_size;
+	size_t data_size;
 	/* list to which the data belongs */
 	struct list_head list;
 };
 
 
 /* the place of the last byte read from the last entry read (partially) */
-static int last_entry_offset = 0;
+static size_t last_entry_offset = 0;
 
 /* the size of the data for each currently tracked data */
-static long watchpoint_data_size[WATCHPOINTS_MAX];
+static size_t watchpoint_data_size[WATCHPOINTS_MAX];
 
 /* the watchpoints class */
 static struct class *watchpoints_class = NULL;
@@ -91,21 +91,20 @@ static void watchpoint_handler(struct perf_event *bp,
 		}
 
 		new_change =
-		    kmalloc(sizeof(struct change_list),
+		    kmalloc(sizeof(&new_change),
 			    __GFP_IO | __GFP_FS);
 
 		size = watchpoint_data_size[i];
-		new_change->data = kmalloc(size + 1, __GFP_IO | __GFP_FS);
+		new_change->data = kmalloc(size, __GFP_IO | __GFP_FS);
 		if (!new_change->data) {
 			return;
 		}
 
 		copy_from_user(new_change->data, (void *) bp->attr.bp_addr,
 			       size);
-		new_change->data[size] = '\0';
 		new_change->pid = watchpoints[i]->ctx->task->pid;
 		new_change->ptr = bp->attr.bp_addr;
-		new_change->data_size = size + 1;
+		new_change->data_size = size;
 
 		printk(KERN_DEBUG
 		       "Process %d, at position %llu, new value :%s\n",
@@ -121,7 +120,7 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			      long unsigned ptr_message)
 {
 	struct watchpoint_message data;
-
+	// check ret_val
 	copy_from_user(&data, (void *) ptr_message, sizeof(data));
 
 	if (data.pid != current->pid) {
@@ -208,9 +207,8 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 }
 
 
-static ssize_t
-watchpoints_read(struct file *file, char __user * user_buffer,
-		 size_t length, loff_t * offset)
+static ssize_t watchpoints_read(struct file *file,
+		char __user * user_buffer, length, loff_t * offset)
 {
 	struct change_list *new_change;
 	char template[] = "pid=%d, pointer=%llu, value=%s\n";
