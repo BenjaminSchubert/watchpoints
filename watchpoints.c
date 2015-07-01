@@ -161,12 +161,10 @@ static struct perf_event *initialize_breakpoint(struct watchpoint_message data, 
 
 
 static void add_ptr_entry_to_pid(struct tracked_pid_list *tracked_pid, struct watchpoint_message ptr) {
-	struct list_head *pos;
+	struct tracked_pointer_list *ptr_entry;
 	int ptr_entry_created = 0;
 
-	list_for_each(pos, &tracked_pid->pointers->list) {
-		struct tracked_pointer_list *ptr_entry;
-		ptr_entry = list_entry(pos, struct tracked_pointer_list, list);
+	list_for_each_entry(ptr_entry, &tracked_pid->pointers->list, list) {
 		if(ptr_entry->ptr == ptr.data_ptr) {
 			ptr_entry_created = 1;
 			break;
@@ -200,12 +198,11 @@ static void add_ptr_entry_to_pid(struct tracked_pid_list *tracked_pid, struct wa
 
 static void prepare_proc_entry(struct watchpoint_message ptr) {
 	struct tracked_pid_list *tracked_pid = NULL;
-	struct list_head *pos;
+	struct tracked_pid_list *pid_list;
 	
-	list_for_each(pos, &tracked_data.list) {
-		if(list_entry(pos, struct tracked_pid_list, list)->pid
-			== current->pid) {
-			tracked_pid = list_entry(pos, struct tracked_pid_list, list);
+	list_for_each_entry(pid_list, &tracked_data.list, list) {
+		if(pid_list->pid == current->pid) {
+			tracked_pid = pid_list;
 			break;
 		}
 	}
@@ -284,6 +281,48 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 }
 
 
+static size_t clean_tracked_changes_data(struct tracked_changes_list *changes) {
+	struct tracked_changes_list *change;
+	struct tracked_changes_list *temp;
+	size_t memory_used = 0;
+	
+	list_for_each_entry_safe(change, temp, &pointers->list, list) {
+		memory_used += ksize(change->data);
+		kfree(change->data);
+		memory_used += ksize(change);
+		kfree(change);
+	}
+	return memory_used;
+}
+
+static size_t clean_tracked_pointer_data(struct tracked_pointer_list *pointers) {
+	struct tracked_pointer_list *pointer;
+	struct tracked_pointer_list *temp;
+	size_t memory_used = 0;
+	
+	list_for_each_entry_safe(pointer, temp, &pointers->list, list) {
+		memory_used += clean_tracked_changes_data(pointer->changes);
+		list_del(&pointer->list);
+		memory_used += ksize(pointer);
+		kfree(pointer);
+	}
+	return memory_used;
+	
+}
+static void clean_tracked_pid_data(void){
+	struct tracked_pid_list *pid;
+	struct tracked_pid_list *temp;
+	size_t memory_used = 0;
+	
+	list_for_each_entry_safe(pid, temp, &tracked_data.list, list) {
+		memory_used += clean_tracked_pointer_data(pid->pointers);
+		list_del(&pid->list);
+		memory_used += ksize(pid);
+		kfree(pid);
+	}
+	printk(KERN_DEBUG "Watchpoints was using %lu bytes at the end\n", memory_used);
+}
+
 static int __init watchpoint_init(void)
 {
 	proc_watchpoints = proc_mkdir("watchpoints", NULL);
@@ -297,6 +336,7 @@ static int __init watchpoint_init(void)
 
 static void __exit watchpoint_exit(void)
 {
+	clean_tracked_pid_data();
 	remove_proc_entry("watchpoints", NULL);
 	misc_deregister(&watchpoints_misc);
 	printk(KERN_INFO "Unloaded module watchpoints\n");
