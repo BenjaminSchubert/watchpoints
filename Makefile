@@ -1,4 +1,5 @@
 obj-m += watchpoints.o
+CFLAGS_watchpoints.o := -Wall -W -Werror -Wextra -Wno-unused-parameter
 
 all: watchpoints test
 

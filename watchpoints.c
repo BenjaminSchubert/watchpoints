@@ -1,3 +1,5 @@
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -7,6 +9,8 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include "watchpoints.h"
+#include <linux/proc_fs.h>
+#include <linux/miscdevice.h>
 
 
 MODULE_AUTHOR("Benjamin Schubert <benjamin.schubert@epfl.ch>");
@@ -19,12 +23,10 @@ MODULE_LICENSE("GPL");
 #define WATCHPOINTS_MAX 4
 
 
+struct proc_dir_entry *proc_watchpoints;
+
 /* Change_list object, to keep track of any change in the tracked data */
-struct change_list {
-	/* pid of the program owning the memory */
-	pid_t pid;
-	/* userspace pointer to the memory */
-	u64 ptr;
+struct tracked_changes_list {
 	/* new value of the data */
 	u8 *data;
 	/* size of the data chunk */
@@ -33,21 +35,24 @@ struct change_list {
 	struct list_head list;
 };
 
+struct tracked_pointer_list {
+	void *ptr;
+	size_t size;
+	struct proc_dir_entry *entry;
+	struct list_head list;
+	struct tracked_changes_list *changes;
+};
 
-/* the place of the last byte read from the last entry read (partially) */
-static size_t last_entry_offset = 0;
+struct tracked_pid_list {
+	pid_t pid;
+	struct proc_dir_entry *entry;
+	struct list_head list;
+	struct tracked_pointer_list *pointers;
+};
 
-/* the size of the data for each currently tracked data */
-static size_t watchpoint_data_size[WATCHPOINTS_MAX];
+	
+struct tracked_pid_list tracked_data;
 
-/* the watchpoints class */
-static struct class *watchpoints_class = NULL;
-
-/* table containing each watchpoint set */
-struct perf_event *watchpoints[WATCHPOINTS_MAX];
-
-/* list of all changes to tracked data */
-struct change_list changes;
 
 
 static void watchpoint_handler(struct perf_event *bp,
@@ -55,255 +60,266 @@ static void watchpoint_handler(struct perf_event *bp,
 			       struct pt_regs *regs);
 static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			      long unsigned ptr_message);
-static ssize_t watchpoints_read(struct file *file,
-				char __user * user_buffer, size_t length,
-				loff_t * offset);
+
 
 static int __init watchpoint_init(void);
 static void __exit watchpoint_exit(void);
 
 
-const struct file_operations Fops = {
-	.read = watchpoints_read,
+const struct file_operations ctrl_fops = {
+	.owner = THIS_MODULE,
+	.read = NULL,
 	.write = NULL,
 	.unlocked_ioctl = watchpoints_ioctl,
 	.open = NULL,
 	.release = NULL,
 };
 
+static struct miscdevice watchpoints_misc = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "watchpoints",
+	.fops = &ctrl_fops
+};
+
+
+const struct file_operations proc_fops = {
+	.read = NULL,
+	.write = NULL
+};
+
 module_init(watchpoint_init);
 module_exit(watchpoint_exit);
 
+
+struct tracked_pointer_list *get_pointer_list_for_pid(u64 pid) {
+	struct list_head *pos;
+	
+	list_for_each(pos, &tracked_data.list) {
+		if(list_entry(pos, struct tracked_pid_list, list)->pid
+			== pid) {
+			printk(KERN_INFO "PID IS %llu\n", pid);
+			return list_entry(pos, struct tracked_pid_list, list)->pointers;	
+		}
+	}
+	return NULL;
+}
+
+struct tracked_pointer_list *get_pointer_from_pointer_list(struct tracked_pointer_list *pointer_list, long ptr) {
+	struct tracked_pointer_list *pointer;
+	
+	for(i = 1; i < 1; i++) { printk("I GOT IT\n"); }
+	if(&pointer_list->list == pointer_list->list.next) printk("THIS IS THE SAME\n");
+	list_for_each_entry(pointer, &pointer_list->list, list) {
+		printk("AM I EMPTY ?\n");
+		/*pointer = list_entry(pos, struct tracked_pointer_list, list);
+		printk("THE POINTER IS %p\n", pointer->ptr);
+		if((long) list_entry(pos, struct tracked_pointer_list, list)->ptr == ptr) {
+			return list_entry(pos, struct tracked_pointer_list, list);
+		}*/
+	}
+	
+	if(list_is_singular(&pointer_list->list)) {
+		printk("I AM ALONE\n");
+	}
+	printk("THERE IS NOTHING HERE\n");
+	return NULL;
+}
 
 static void watchpoint_handler(struct perf_event *bp,
 			       struct perf_sample_data *data,
 			       struct pt_regs *regs)
 {
-	int i;
-
-	for (i = 0; i < WATCHPOINTS_MAX; i++) {
-		struct change_list *new_change;
-		long size;
-
-		if (!watchpoints[i]
-		    && watchpoints[i]->attr.bp_addr == bp->attr.bp_addr) {
-			continue;
-		}
-
-		new_change =
-		    kmalloc(sizeof(&new_change),
-			    __GFP_IO | __GFP_FS);
-
-		size = watchpoint_data_size[i];
-		new_change->data = kmalloc(size, __GFP_IO | __GFP_FS);
-		if (!new_change->data) {
-			return;
-		}
-
-		copy_from_user(new_change->data, (void *) bp->attr.bp_addr,
-			       size);
-		new_change->pid = watchpoints[i]->ctx->task->pid;
-		new_change->ptr = bp->attr.bp_addr;
-		new_change->data_size = size;
-
-		printk(KERN_DEBUG
-		       "Process %d, at position %llu, new value :%s\n",
-		       new_change->pid, new_change->ptr, new_change->data);
-
-		list_add_tail(&(new_change->list), &(changes.list));
-		break;
+	struct tracked_pointer_list *pointer_list;
+	
+	struct tracked_pointer_list *pointer;
+	/*struct tracked_changes_list *new_change;
+	*/
+	printk("The REAL PTR IS %llx\n", bp->attr.bp_addr);
+	pointer_list = get_pointer_list_for_pid(bp->ctx->task->pid);
+	pointer = get_pointer_from_pointer_list(pointer_list, bp->attr.bp_addr);
+	
+	if(!pointer) {
+		printk("ABORT ABORT\n");
+		return;
 	}
+	printk("The pointer is %p\n", pointer->ptr);
+
+	
+/*	new_change = kmalloc(sizeof(*new_change), 0);
+	new_change->data = kmalloc(pointer->size, 0);
+	printk(KERN_INFO "Pointer is %ld, size is %ld\n", pointer->ptr, pointer->size);
+	return;
+	copy_from_user(new_change->data, (void *) pointer->ptr, pointer->size);
+	printk(KERN_INFO "WE ARE THERE\n");
+	printk(KERN_DEBUG
+		"Process %d at position %ld, new value: %s\n",
+		bp->ctx->task->pid, pointer->ptr, new_change->data);
+	
+*/	
 }
 
 
-static long watchpoints_ioctl(struct file *file, unsigned int cmd,
-			      long unsigned ptr_message)
-{
-	struct watchpoint_message data;
-	// check ret_val
-	copy_from_user(&data, (void *) ptr_message, sizeof(data));
+static struct perf_event *initialize_breakpoint(struct watchpoint_message data, pid_t pid) {
+	struct perf_event *perf_watchpoint;
+	struct task_struct *tsk;
+	struct perf_event_attr attr;
+	
+	/* Initialize breakpoint */
+	hw_breakpoint_init(&attr);
+	attr.bp_addr = (u64) data.data_ptr;
+	attr.bp_len = HW_BREAKPOINT_LEN_4;
+	attr.bp_type = HW_BREAKPOINT_W;
 
-	if (data.pid != current->pid) {
-		printk(KERN_ERR
-		       "Attempting to place breakpoint on other process. Abort\n");
-		return -EINVAL;
-	}
+	tsk = pid_task(find_vpid(pid), PIDTYPE_PID);
 
-	printk(KERN_DEBUG "Received pid %d, ptr %ld, size %ld\n", data.pid,
-	       data.data_ptr, data.data_size);
-
-	switch (cmd) {
-	case ADD_BREAKPOINT: {
-		struct task_struct *tsk;
-		struct perf_event_attr attr;
-		struct perf_event *perf_watchpoint;
-		int i;
-
-		if(!access_ok(VERIFY_READ, data.data_ptr, data.data_size)) {
-			printk(KERN_ERR
-			       "Process %d tried to access address %ld",
-			       data.pid, data.data_ptr);
-			return -EINVAL;
-		}
-
-		/* Initialize breakpoint */
-		hw_breakpoint_init(&attr);
-		attr.bp_addr = data.data_ptr;
-		attr.bp_len = HW_BREAKPOINT_LEN_4;
-		attr.bp_type = HW_BREAKPOINT_W;
-
-		tsk = pid_task(find_vpid(data.pid), PIDTYPE_PID);
-
-		perf_watchpoint =
-		    register_user_hw_breakpoint(&attr, watchpoint_handler,
-						NULL, tsk);
-
-		if (IS_ERR(perf_watchpoint)) {
-			printk(KERN_DEBUG "Could not set watchpoint");
-			return perf_watchpoint;
-		}
-
-		for (i = 0; i < WATCHPOINTS_MAX; i++) {
-			if (!watchpoints[i]) {
-				watchpoints[i] = perf_watchpoint;
-				watchpoint_data_size[i] = data.data_size;
-				break;
-			} else if (watchpoints[i]->state ==
-				   PERF_EVENT_STATE_OFF) {
-				printk(KERN_DEBUG
-				       "Removing watchpoint at %i. Not used anymore\n",
-				       i);
-
-				unregister_hw_breakpoint(watchpoints[i]);
-				watchpoints[i] = perf_watchpoint;
-				watchpoint_data_size[i] = data.data_size;
-				break;
-			}
-		}
-		break;
-	}
-
-	case REMOVE_BREAKPOINT: {
-		int i;
-
-		for (i = 0; i < WATCHPOINTS_MAX; i++) {
-			if (watchpoints[i]
-			    && watchpoints[i]->attr.bp_addr ==
-			    data.data_ptr
-			    && watchpoints[i]->ctx->task->pid ==
-			    data.pid) {
-				unregister_hw_breakpoint(watchpoints[i]);
-			}
-		}
-		break;
-	}
-
-	default:
-		return -EINVAL;
-
-
-	}
-	return 0;
+	perf_watchpoint =
+	    register_user_hw_breakpoint(&attr, watchpoint_handler,
+					NULL, tsk);
+					
+	return perf_watchpoint;
 }
 
 
-static ssize_t watchpoints_read(struct file *file,
-		char __user * user_buffer, length, loff_t * offset)
-{
-	struct change_list *new_change;
-	char template[] = "pid=%d, pointer=%llu, value=%s\n";
-	char *output;
-	char *output_pointer;
-	struct list_head *pos, *q;
-	size_t bytes_read = 0;
+static void add_ptr_entry_to_pid(struct tracked_pid_list *tracked_pid, struct watchpoint_message ptr) {
+	struct list_head *pos;
+	int ptr_entry_created = 0;
 
-	list_for_each_safe(pos, q, &changes.list) {
-		new_change =
-		    list_first_entry(&(changes.list), struct change_list,
-				     list);
-		output =
-		    kmalloc(snprintf
-			    (NULL, 0, template, new_change->pid,
-			     new_change->ptr, new_change->data),
-			    __GFP_REPEAT);
-		sprintf(output, template, new_change->pid, new_change->ptr,
-			new_change->data);
-		output_pointer = output + last_entry_offset;
-
-		if(last_entry_offset == 0) {
-			printk(KERN_DEBUG "%s", output);
+	if(tracked_pid->pointers) {
+		list_for_each(pos, &tracked_pid->pointers->list) {
+			struct tracked_pointer_list *ptr_entry;
+			ptr_entry = list_entry(pos, struct tracked_pointer_list, list);
+			if(ptr_entry->ptr == ptr.data_ptr) {
+				ptr_entry_created = 1;
+				break;
+			}
 		}
+	}
 
-		while (length && *output_pointer) {
-			put_user(*(output_pointer++), user_buffer++);
-			length--;
-			bytes_read++;
-		}
+	if(!ptr_entry_created) {
+		struct proc_dir_entry *proc_ptr;
+		struct tracked_changes_list *changes;
+		struct tracked_pointer_list *ptr_entry;
+		char ptr_value[2*sizeof(long) + 1];
+		
+		sprintf(ptr_value, "%p", ptr.data_ptr);
+		proc_ptr = proc_create(ptr_value, 0, tracked_pid->entry, &proc_fops);
+		changes = kmalloc(sizeof(*changes), 0);
+		INIT_LIST_HEAD(&changes->list);
 
-		if (!*output_pointer) {
-			/* we finished processing this entry, let's clean ! */
-			kfree(new_change->data);
-			list_del(pos);
-			last_entry_offset = 0;
+		ptr_entry = kmalloc(sizeof(*ptr_entry), 0);
+		ptr_entry->ptr = ptr.data_ptr;
+		ptr_entry->size = ptr.data_size;
+		ptr_entry->entry = proc_ptr;
+		ptr_entry->changes = changes;
+
+		pr_debug("Watchpoints:added pid entry: %p\n", ptr_entry->ptr);
+		
+		if(tracked_pid->pointers) {
+			list_add(&(ptr_entry->list), &(tracked_pid->pointers)->list);
 		} else {
-			last_entry_offset = output_pointer - output;
+			INIT_LIST_HEAD(&ptr_entry->list);
+			tracked_pid->pointers = ptr_entry;
 		}
-		kfree(output);
-		if (!length) {
-			/* we finished putting things in the buffer, let's break ! */
+	}
+}
+
+static void prepare_proc_entry(struct watchpoint_message ptr) {
+	struct tracked_pid_list *tracked_pid = NULL;
+	struct list_head *pos;
+	
+	list_for_each(pos, &tracked_data.list) {
+		if(list_entry(pos, struct tracked_pid_list, list)->pid
+			== current->pid) {
+			tracked_pid = list_entry(pos, struct tracked_pid_list, list);
 			break;
 		}
 	}
 
-	return bytes_read;
+	if(!tracked_pid) {
+		struct proc_dir_entry *pid_entry;
+		char pid_name[30];
+		
+		tracked_pid = kmalloc(sizeof(*tracked_pid), 0);
 
+		sprintf(pid_name, "%d", current->pid);
+		pid_entry = proc_mkdir(pid_name, proc_watchpoints);
+		
+		tracked_pid->pid = current->pid;
+		tracked_pid->entry = pid_entry;
+		tracked_pid->pointers = NULL;
+
+		pr_debug("added pid entry: %d\n", tracked_pid->pid);
+		list_add(&(tracked_pid->list), &tracked_data.list);
+	}
+	
+	add_ptr_entry_to_pid(tracked_pid, ptr);
+}
+
+static long add_breakpoint(struct watchpoint_message data) {
+	struct perf_event *perf_watchpoint;
+
+	if(!access_ok(VERIFY_READ, data.data_ptr, data.data_size)) {
+		printk(KERN_ERR
+		       "Process %d tried to access address %p\n",
+		       current->pid, data.data_ptr);
+		return -EINVAL;
+	}
+
+	perf_watchpoint = initialize_breakpoint(data, current->pid);
+
+	if (IS_ERR(perf_watchpoint)) {
+		printk(KERN_DEBUG "Could not set watchpoint\n");
+		return -EBUSY;
+	}
+	
+	prepare_proc_entry(data);
+
+	return 0;	
+}
+
+static long remove_breakpoint(struct watchpoint_message data) {
+	return 0;
+}
+
+
+static long watchpoints_ioctl(struct file *file, unsigned int cmd,
+			      unsigned long ptr_message)
+{
+	struct watchpoint_message data;
+
+	/* check ret_val */
+	copy_from_user(&data, (void *) ptr_message, sizeof(data));
+
+
+	printk(KERN_DEBUG "Received from pid %d, ptr %p, size %ld\n", current->pid,
+	       data.data_ptr, data.data_size);
+
+	switch (cmd) {
+	case ADD_BREAKPOINT:
+		return add_breakpoint(data);
+	case REMOVE_BREAKPOINT:
+		return remove_breakpoint(data);
+	default:
+		printk(KERN_INFO "Watchpoints was sent an unknown command %d\n", cmd);
+		return -EINVAL;
+	}
 }
 
 
 static int __init watchpoint_init(void)
 {
-	void *ptr_err;
+	proc_watchpoints = proc_mkdir("watchpoints", NULL);
 
-	watchpoints_class = class_create(THIS_MODULE, DEVICE_NAME);
-	if (IS_ERR(watchpoints_class)) {
-		return -EFAULT;
-	}
-
-	ptr_err =
-	    device_create(watchpoints_class, NULL, MKDEV(MAJOR_NUM, 0),
-			  NULL, DEVICE_NAME);
-	if (IS_ERR(ptr_err)) {
-		class_unregister(watchpoints_class);
-		class_destroy(watchpoints_class);
-		return -EFAULT;
-	}
-
-	register_chrdev(MAJOR_NUM, DEVICE_NAME, &Fops);
-
-	INIT_LIST_HEAD(&changes.list);
-
-	printk(KERN_INFO "Loaded watchpoints module\n");
+	INIT_LIST_HEAD(&tracked_data.list);
+	misc_register(&watchpoints_misc);
+	printk(KERN_INFO "Loaded module watchpoints\n");
 	return 0;
 }
 
 
 static void __exit watchpoint_exit(void)
 {
-	struct change_list *new_change;
-	struct list_head *pos, *q;
-
-	list_for_each_safe(pos, q, &changes.list) {
-		new_change =
-		    list_first_entry(&(changes.list), struct change_list,
-				     list);
-		kfree(new_change->data);
-		list_del(pos);
-	}
-
-	unregister_chrdev(MAJOR_NUM, DEVICE_NAME);
-	device_destroy(watchpoints_class, MKDEV(MAJOR_NUM, 0));
-	class_unregister(watchpoints_class);
-	class_destroy(watchpoints_class);
-
-	printk(KERN_INFO "Unloaded watchpoints module\n");
+	remove_proc_entry("watchpoints", NULL);
+	misc_deregister(&watchpoints_misc);
+	printk(KERN_INFO "Unloaded module watchpoints\n");
 }

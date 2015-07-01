@@ -9,8 +9,7 @@
 #define REMOVE_BREAKPOINT 2
 
 struct watchpoint_message {
-	pid_t pid;
-	long data_ptr;
+	void *data_ptr;
 	long data_size;
 };
 #endif
