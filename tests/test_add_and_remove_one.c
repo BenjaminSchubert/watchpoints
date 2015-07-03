@@ -27,14 +27,14 @@ void *create_and_modify_data()
 	CU_ASSERT_NOT_EQUAL(file_desc, -1);
 
 	/* enable data tracking */
-	ret_val = ioctl(file_desc, 0, &data);
+	ret_val = ioctl(file_desc, ADD_WATCHPOINT, &data);
 	CU_ASSERT_FALSE(ret_val);
 
 	sprintf(track_me, "%s", "5323");
 	sprintf(track_me, "%s", "4321");
 
 	/* disable data tracking */
-	ret_val = ioctl(file_desc, 2, &data);
+	ret_val = ioctl(file_desc, REMOVE_WATCHPOINT, &data);
 	CU_ASSERT_FALSE(ret_val);
 
 	return track_me;

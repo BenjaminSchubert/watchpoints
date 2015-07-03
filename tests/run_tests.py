@@ -33,7 +33,7 @@ def run(program, result):
 		output = subprocess.check_output(["./{}".format(program)], cwd=cwd)
 	finally:
 		subprocess.check_output(["rmmod", module])
-	print(output.decode())
+
 	show_next_line = False
 	for entry in output.decode().split("\n"):
 		entry = entry.strip()
