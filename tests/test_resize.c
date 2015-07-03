@@ -30,7 +30,16 @@ void *create_and_modify_data()
 	CU_ASSERT_FALSE(ioctl(file_desc, WATCHPOINT_ADD, &data));
 
 	sprintf(track_me, "%s", "5323");
-	sprintf(track_me, "%s", "4321");
+	
+	/* resize data */
+	data.data_size = 8 * sizeof(char);
+	track_me = realloc(track_me, data.data_size);	
+	CU_ASSERT_PTR_NOT_NULL_FATAL(track_me);
+
+	data.new_data_ptr = track_me;
+	CU_ASSERT_FALSE(ioctl(file_desc, WATCHPOINT_RESIZE, &data));
+	
+	sprintf(track_me, "%s", "43211234");
 
 	/* disable data tracking */
 	CU_ASSERT_FALSE(ioctl(file_desc, WATCHPOINT_REMOVE, &data));
@@ -41,7 +50,7 @@ void *create_and_modify_data()
 }
 
 
-void test_add_and_remove()
+void test_resize()
 {
 	char proc_directory[255];
 	FILE *proc_values;
@@ -54,7 +63,7 @@ void test_add_and_remove()
 	proc_values = fopen(proc_directory, "r");
 
 	CU_ASSERT_STRING_EQUAL(get_data(proc_values), "5323");
-	CU_ASSERT_STRING_EQUAL(get_data(proc_values), "4321");
+	CU_ASSERT_STRING_EQUAL(get_data(proc_values), "43211234");
 	CU_ASSERT_EQUAL(fgetc(proc_values), EOF);
 
 	fclose(proc_values);
@@ -65,7 +74,7 @@ void test_add_and_remove()
 
 int main()
 {
-	return run_suite("test_add_remove_one",
-			 "test Addition and removal",
-			 test_add_and_remove);
+	return run_suite("test_resize",
+			 "test Resize of data",
+			 test_resize);
 }

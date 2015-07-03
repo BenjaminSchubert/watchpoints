@@ -407,6 +407,10 @@ static long remove_watchpoint(struct watchpoint_message data)
 }
 
 
+static long resize_watchpoint(struct watchpoint_message data) {
+	return 0;
+}
+
 static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long ptr_message)
 {
@@ -420,11 +424,14 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 		data.data_ptr, data.data_size);
 
 	switch (cmd) {
-	case ADD_WATCHPOINT:
+	case WATCHPOINT_ADD:
 		ret_val = add_watchpoint(data);
 		break;
-	case REMOVE_WATCHPOINT:
+	case WATCHPOINT_REMOVE:
 		ret_val = remove_watchpoint(data);
+		break;
+	case WATCHPOINT_RESIZE:
+		ret_val = resize_watchpoint(data);
 		break;
 	default:
 		pr_info("Watchpoints was sent an unknown command %d\n",
