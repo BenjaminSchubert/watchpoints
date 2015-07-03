@@ -16,7 +16,6 @@ void *create_and_modify_data()
 	char *track_me = malloc(sizeof(char) * 4);
 	struct watchpoint_message data;
 	int file_desc;
-	int ret_val;
 
 	data.data_ptr = track_me;
 	data.data_size = 4 * sizeof(char);
@@ -27,15 +26,15 @@ void *create_and_modify_data()
 	CU_ASSERT_NOT_EQUAL(file_desc, -1);
 
 	/* enable data tracking */
-	ret_val = ioctl(file_desc, ADD_WATCHPOINT, &data);
-	CU_ASSERT_FALSE(ret_val);
+	CU_ASSERT_FALSE(ioctl(file_desc, ADD_WATCHPOINT, &data));
 
 	sprintf(track_me, "%s", "5323");
 	sprintf(track_me, "%s", "4321");
 
 	/* disable data tracking */
-	ret_val = ioctl(file_desc, REMOVE_WATCHPOINT, &data);
-	CU_ASSERT_FALSE(ret_val);
+	CU_ASSERT_FALSE(ioctl(file_desc, REMOVE_WATCHPOINT, &data));
+
+	sprintf(track_me, "%s", "0000");
 
 	return track_me;
 }
@@ -82,6 +81,7 @@ void test_add_and_remove()
 
 	CU_ASSERT_STRING_EQUAL(get_data(proc_values), "5323");
 	CU_ASSERT_STRING_EQUAL(get_data(proc_values), "4321");
+	CU_ASSERT_EQUAL(fgetc(proc_values), EOF);
 
 	fclose(proc_values);
 

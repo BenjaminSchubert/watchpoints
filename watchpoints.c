@@ -77,10 +77,10 @@ static struct perf_event *initialize_watchpoint(struct watchpoint_message
 
 /* adds a new pointer to the list of pointers tracked by the pid */
 static void add_ptr_entry_to_pid(struct tracked_pid_list *tracked_pid,
-				 struct perf_event * event, long size);
+				 struct perf_event *event, long size);
 
 /* creates a new proc entry for the pid of ptr*/
-static void prepare_proc_entry(struct perf_event * event, long size);
+static void prepare_proc_entry(struct perf_event *event, long size);
 
 /* adds a new watchpoint */
 static long add_watchpoint(struct watchpoint_message data);
@@ -249,15 +249,18 @@ static void watchpoint_handler(struct perf_event *bp,
 	    get_pointer_from_pointer_list(pointer_list, bp->attr.bp_addr);
 
 	new_change = kmalloc(sizeof(*new_change), 0);
-	new_change->data = kmalloc(pointer->size, 0);
+	new_change->data = kmalloc((pointer->size + 1) * sizeof(u8), 0);
+	new_change->data[pointer->size] = '\0';
 
-	pr_debug("The pointer is %016llx with size of %ld\n", pointer->event->attr.bp_addr,
-		 pointer->size);
+	pr_debug("The pointer is %016llx with size of %ld\n",
+		 pointer->event->attr.bp_addr, pointer->size);
 
-	copy_from_user(new_change->data, (void *) pointer->event->attr.bp_addr,
+	copy_from_user(new_change->data,
+		       (void *) pointer->event->attr.bp_addr,
 		       pointer->size);
 	pr_debug("Process %d at position %016llx, new value: %s\n",
-		 bp->ctx->task->pid, pointer->event->attr.bp_addr, new_change->data);
+		 bp->ctx->task->pid, pointer->event->attr.bp_addr,
+		 new_change->data);
 
 	new_change->data_size = pointer->size;
 	list_add_tail(&(new_change->list), &pointer->changes->list);
@@ -287,7 +290,7 @@ static struct perf_event *initialize_watchpoint(struct watchpoint_message
 
 
 static void add_ptr_entry_to_pid(struct tracked_pid_list *tracked_pid,
-				 struct perf_event * event, long size)
+				 struct perf_event *event, long size)
 {
 	struct tracked_pointer_list *ptr_entry;
 	int ptr_entry_created = 0;
@@ -327,7 +330,7 @@ static void add_ptr_entry_to_pid(struct tracked_pid_list *tracked_pid,
 	}
 }
 
-static void prepare_proc_entry(struct perf_event * event, long size)
+static void prepare_proc_entry(struct perf_event *event, long size)
 {
 	struct tracked_pid_list *tracked_pid = NULL;
 	struct tracked_pid_list *pid_list;
@@ -369,7 +372,7 @@ static long add_watchpoint(struct watchpoint_message data)
 	perf_watchpoint = initialize_watchpoint(data, current->pid);
 
 	if (IS_ERR(perf_watchpoint)) {
-		printk(KERN_DEBUG "Could not set watchpoint\n");
+		pr_info("Could not set watchpoint\n");
 		return -EBUSY;
 	}
 
@@ -380,8 +383,27 @@ static long add_watchpoint(struct watchpoint_message data)
 
 static long remove_watchpoint(struct watchpoint_message data)
 {
-	/* TODO: implement */
+	struct tracked_pointer_list *pointers_for_pid;
+	struct tracked_pointer_list *pointer;
+
+	pointers_for_pid = get_pointer_list_for_pid(current->pid);
+	if (!pointers_for_pid)
+		goto fail;
+
+	pointer =
+	    get_pointer_from_pointer_list(pointers_for_pid,
+					  (u64) data.data_ptr);
+	if (!pointer)
+		goto fail;
+
+	unregister_hw_breakpoint(pointer->event);
+	pr_debug("Removed watchpoint on %016llx for pid %d\n",
+		 (u64) data.data_ptr, current->pid);
+
 	return 0;
+
+      fail:
+	return -EINVAL;
 }
 
 
@@ -389,24 +411,29 @@ static long watchpoints_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long ptr_message)
 {
 	struct watchpoint_message data;
+	long ret_val;
 
 	/* TODO: check ret_val */
 	copy_from_user(&data, (void *) ptr_message, sizeof(data));
 
-	printk("Received from pid %d, ptr %p, size %ld\n", current->pid,
-		 data.data_ptr, data.data_size);
+	pr_info("Received from pid %d, ptr %p, size %ld\n", current->pid,
+		data.data_ptr, data.data_size);
 
 	switch (cmd) {
 	case ADD_WATCHPOINT:
-		return add_watchpoint(data);
+		ret_val = add_watchpoint(data);
+		break;
 	case REMOVE_WATCHPOINT:
-		return remove_watchpoint(data);
+		ret_val = remove_watchpoint(data);
+		break;
 	default:
-		printk(KERN_INFO
-		       "Watchpoints was sent an unknown command %d\n",
-		       cmd);
-		return -EINVAL;
+		pr_info("Watchpoints was sent an unknown command %d\n",
+			cmd);
+		ret_val = -EINVAL;
+		break;
 	}
+
+	return ret_val;
 }
 
 
@@ -423,6 +450,7 @@ static size_t clean_tracked_changes_data(struct tracked_changes_list
 		memory_used += ksize(change);
 		kfree(change);
 	}
+
 	return memory_used;
 }
 
@@ -440,15 +468,16 @@ static size_t clean_tracked_pointer_data(struct tracked_pointer_list
 		memory_used +=
 		    clean_tracked_changes_data(pointer->changes);
 
-		sprintf(ptr_value, "%016llx", pointer->event->attr.bp_addr);
+		sprintf(ptr_value, "%016llx",
+			pointer->event->attr.bp_addr);
 		remove_proc_entry(ptr_value, parent_entry);
 
 		list_del(&pointer->list);
 		memory_used += ksize(pointer);
 		kfree(pointer);
 	}
-	return memory_used;
 
+	return memory_used;
 }
 
 static void clean_tracked_pid_data(void)
@@ -470,7 +499,7 @@ static void clean_tracked_pid_data(void)
 		memory_used += ksize(pid);
 		kfree(pid);
 	}
-	printk(KERN_DEBUG "watchpoints: using %lu bytes\n", memory_used);
+	pr_debug("using %lu bytes\n", memory_used);
 }
 
 static int __init watchpoint_init(void)
@@ -479,7 +508,7 @@ static int __init watchpoint_init(void)
 
 	INIT_LIST_HEAD(&tracked_data.list);
 	misc_register(&watchpoints_misc);
-	printk(KERN_INFO "Loaded module watchpoints\n");
+	pr_info("module successfully loaded\n");
 	return 0;
 }
 
@@ -489,5 +518,5 @@ static void __exit watchpoint_exit(void)
 	clean_tracked_pid_data();
 	remove_proc_entry("watchpoints", NULL);
 	misc_deregister(&watchpoints_misc);
-	printk(KERN_INFO "Unloaded module watchpoints\n");
+	pr_info("module successfully unloaded\n");
 }
