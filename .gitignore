@@ -1,0 +1,12 @@
+*~
+tests/build/*
+.tmp_versions/
+.watchpoints.ko.cmd
+.watchpoints.mod.o.cmd
+.watchpoints.o.cmd
+Module.symvers
+modules.order
+watchpoints.ko
+watchpoints.mod.c
+watchpoints.mod.o
+watchpoints.o
